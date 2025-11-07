@@ -1,18 +1,21 @@
 /*
  * ==================================================================================
- * === SUPER-DUPER COOL ARDUINO BASED MULTICOLOR SOUND PLAYING LIGHTSABER           ===
- * === Progetto Originale di AlexGyver                                            ===
- * ===                                                                            ===
- * === Questo codice è la versione STABILE E DEFINITIVA per ESP32-S3.              ===
- * === Utilizza librerie moderne e testate per la massima compatibilità.          ===
+ * ===           GYVERSABER V2 - PORTING PER ESP32-S3 CON PLATFORMIO              ===
+ * === Progetto Originale di AlexGyver, riadattato e migliorato                   ===
  * ==================================================================================
  *
- * AGGIORNAMENTI CHIAVE IN QUESTA VERSIONE (V2):
- * - SOSTITUITE le vecchie librerie I2Cdev e MPU6050 con la libreria ufficiale
- * "Adafruit MPU6050". Questo risolve i problemi di compilazione e blocco.
- * - Semplificata l'inizializzazione del sensore.
- * - Corretto il valore della resistenza R2 per la sicurezza dell'ESP32.
- * - Mantenute tutte le funzionalità originali con codice più pulito e stabile.
+ * DESCRIZIONE:
+ * Questo progetto trasforma un ESP32-S3 in una spada laser multifunzione con:
+ * - Lama multicolore basata su LED indirizzabili (WS2811/WS2812).
+ * - Effetti sonori realistici basati su file .wav da una scheda SD.
+ * - Rilevamento del movimento (swing e colpi) tramite un sensore MPU6050.
+ * - Gestione avanzata dell'alimentazione con monitoraggio della batteria.
+ *
+ * MIGLIORAMENTI IN QUESTA VERSIONE:
+ * - Struttura del progetto basata su PlatformIO per una gestione pulita
+ *   delle dipendenze e una facile compilazione.
+ * - Codice modularizzato: le impostazioni sono in `config.h`.
+ * - Utilizzo di librerie moderne e stabili per ESP32.
  */
 
 // ============================ LIBRERIE ============================
@@ -25,66 +28,25 @@
 
 // --- Librerie Specifiche per Dispositivi ---
 #include "FastLED.h"
-// --- MODIFICA IMPORTANTE: Nuove librerie per il sensore MPU6050 ---
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 
-// --- LIBRERIE AUDIO DI ALTA QUALITÀ PER ESP32 ---
+// --- Librerie Audio ---
 #include "AudioFileSourceSD.h"
 #include "AudioFileSourceID3.h"
 #include "AudioGeneratorWAV.h"
 #include "AudioOutputI2S.h"
 
-// ========================= DEFINIZIONE HARDWARE & PINOUT (ESP32-S3) =========================
-// --- Striscia LED ---
-#define LED_PIN 18
-#define NUM_LEDS 30
-#define BRIGHTNESS 255
-
-// --- Pulsante di Controllo ---
-#define BTN_PIN 4
-
-// --- Altoparlante / Amplificatore ---
-#define SPEAKER_PIN 17
-
-// --- Comunicazione I2C (Sensore MPU6050) ---
-#define MPU_SDA_PIN 8
-#define MPU_SCL_PIN 9
-
-// --- Comunicazione SPI (Modulo Scheda SD) ---
-#define SD_CS_PIN 10
-#define SPI_MOSI_PIN 11
-#define SPI_MISO_PIN 13
-#define SPI_SCK_PIN 12
-
-// --- Misurazione Tensione Batteria ---
-#define VOLT_PIN 1
-#define R1 100000.0f
-#define R2 33000.0f         // Valore corretto per la sicurezza dell'ESP32
-
-// ============================ IMPOSTAZIONI DEL PROGETTO ============================
-#define BTN_TIMEOUT 800
-#define SWING_TIMEOUT 500
-#define SWING_L_THR 150
-#define SWING_THR 300
-#define STRIKE_THR 150
-#define STRIKE_S_THR 320
-#define FLASH_DELAY 80
-
-#define PULSE_ALLOW 1
-#define PULSE_AMPL 20
-#define PULSE_DELAY 30
-
-#define BATTERY_SAFE 1
-#define DEBUG 1
+// --- IMPOSTAZIONI E CONFIGURAZIONE ---
+#include "config.h"         // Contiene tutte le impostazioni e i pin
 
 // ============================ OGGETTI GLOBALI & VARIABILI ============================
 // --- Dispositivi & Librerie ---
 CRGB leds[NUM_LEDS];
-Adafruit_MPU6050 mpu; // NUOVO oggetto per il sensore
+Adafruit_MPU6050 mpu;
 SPIClass spi = SPIClass(HSPI);
 
-// --- Audio Objects ---
+// --- Oggetti Audio ---
 AudioGeneratorWAV *wav;
 AudioFileSourceSD *file;
 AudioOutputI2S *out;
@@ -103,7 +65,7 @@ byte btn_counter;
 unsigned long btn_timer;
 
 // --- Timer ---
-unsigned long PULSE_timer, swing_timer, swing_timeout, battery_timer;
+unsigned long PULSE_timer, swing_timer, battery_timer;
 
 // --- Colore & Effetti ---
 byte nowColor;
@@ -118,28 +80,54 @@ float voltage;
 // ============================ DEFINIZIONE FILE AUDIO (PROGMEM) ============================
 // NOTA: I nomi dei file sulla scheda SD devono iniziare con una barra '/'
 const char strike1[] PROGMEM = "/SK1.wav"; const char strike2[] PROGMEM = "/SK2.wav";
-const char* const strikes[] PROGMEM = { strike1, strike2 /*, ... (omesso per brevità) */};
+const char strike3[] PROGMEM = "/SK3.wav"; const char strike4[] PROGMEM = "/SK4.wav";
+const char strike5[] PROGMEM = "/SK5.wav"; const char strike6[] PROGMEM = "/SK6.wav";
+const char strike7[] PROGMEM = "/SK7.wav"; const char strike8[] PROGMEM = "/SK8.wav";
+const char* const strikes[] PROGMEM = { strike1, strike2, strike3, strike4, strike5, strike6, strike7, strike8 };
 
 const char strike_s1[] PROGMEM = "/SKS1.wav"; const char strike_s2[] PROGMEM = "/SKS2.wav";
-const char* const strikes_short[] PROGMEM = { strike_s1, strike_s2 /*, ... */};
+const char strike_s3[] PROGMEM = "/SKS3.wav"; const char strike_s4[] PROGMEM = "/SKS4.wav";
+const char strike_s5[] PROGMEM = "/SKS5.wav"; const char strike_s6[] PROGMEM = "/SKS6.wav";
+const char strike_s7[] PROGMEM = "/SKS7.wav"; const char strike_s8[] PROGMEM = "/SKS8.wav";
+const char* const strikes_short[] PROGMEM = { strike_s1, strike_s2, strike_s3, strike_s4, strike_s5, strike_s6, strike_s7, strike_s8 };
 
 const char swing1[] PROGMEM = "/SWS1.wav"; const char swing2[] PROGMEM = "/SWS2.wav";
-const char* const swings[] PROGMEM = { swing1, swing2 /*, ... */};
+const char swing3[] PROGMEM = "/SWS3.wav"; const char swing4[] PROGMEM = "/SWS4.wav";
+const char swing5[] PROGMEM = "/SWS5.wav";
+const char* const swings[] PROGMEM = { swing1, swing2, swing3, swing4, swing5 };
 
 const char swingL1[] PROGMEM = "/SWL1.wav"; const char swingL2[] PROGMEM = "/SWL2.wav";
-const char* const swings_L[] PROGMEM = { swingL1, swingL2 /*, ... */};
+const char swingL3[] PROGMEM = "/SWL3.wav"; const char swingL4[] PROGMEM = "/SWL4.wav";
+const char* const swings_L[] PROGMEM = { swingL1, swingL2, swingL3, swingL4 };
 
 const char sound_on[] PROGMEM = "/ON.wav";
 const char sound_off[] PROGMEM = "/OFF.wav";
 const char sound_hum[] PROGMEM = "/HUM.wav";
 char sound_buffer[12];
 
+// Function prototypes
+void playSound(const char* filename);
+void handleSaberState();
+void btnTick();
+void getMotion();
+void strikeTick();
+void swingTick();
+void randomPULSE();
+void setPixel(int pixel, byte r, byte g, byte b);
+void setAll(byte r, byte g, byte b);
+void light_up();
+void light_down();
+void hit_flash();
+void setColor(byte color);
+void batteryTick();
+byte voltage_measure();
+
 // =================================== SETUP ===================================
 void setup() {
   if (DEBUG) {
     Serial.begin(115200);
     while (!Serial) { delay(10); }
-    Serial.println(F("Avvio GyverSaber su ESP32 (V2 Stabile)..."));
+    Serial.println(F("Avvio GyverSaber ESP32..."));
   }
 
   pinMode(BTN_PIN, INPUT_PULLUP);
@@ -148,7 +136,7 @@ void setup() {
   
   spi.begin(SPI_SCK_PIN, SPI_MISO_PIN, SPI_MOSI_PIN, SD_CS_PIN);
   
-  // --- NUOVA INIZIALIZZAZIONE MPU6050 ---
+  // --- Inizializzazione MPU6050 ---
   if (!mpu.begin()) {
     if(DEBUG) Serial.println("MPU6050 non trovato!");
     while (1) { delay(10); }
@@ -169,7 +157,7 @@ void setup() {
   }
   
   out = new AudioOutputI2S(0, 1);
-  out->SetPinout(25, SPEAKER_PIN, 27);
+  out->SetPinout(25, SPEAKER_PIN, 27); // Standard I2S pins for ESP32
   out->SetOutputModeMono(true);
   out->SetGain(2.0);
 
@@ -185,7 +173,8 @@ void setup() {
 
   byte capacity = voltage_measure();
   if (DEBUG) {
-    Serial.print(F("Tensione Batteria: ")); Serial.println(voltage);
+    Serial.print(F("Tensione Batteria: ")); Serial.print(voltage);
+    Serial.print(F(" (")); Serial.print(capacity); Serial.println(F("%)"));
   }
   int ledsToShow = map(capacity, 100, 0, (NUM_LEDS / 2), 0);
   for (int i = 0; i < ledsToShow; i++) {
@@ -201,6 +190,7 @@ void setup() {
 
 // =================================== MAIN LOOP ===================================
 void loop() {
+  // Gestisce la riproduzione audio in background
   if (wav && wav->isRunning()) {
     if (!wav->loop()) {
       wav->stop();
@@ -209,21 +199,23 @@ void loop() {
     }
   }
 
-  handleSaberState();
-  if(ls_state){
+  handleSaberState(); // Controlla se la spada deve accendersi o spegnersi
+
+  if(ls_state){ // Se la spada è accesa...
     randomPULSE();
     getMotion();
     strikeTick();
     swingTick();
     batteryTick();
     
+    // Se nessun altro suono è in riproduzione, riproduci il ronzio (hum)
     if (!wav || !wav->isRunning()){
       strcpy_P(sound_buffer, (char*)pgm_read_word(&(sound_hum)));
       playSound(sound_buffer);
     }
   }
 
-  btnTick();
+  btnTick(); // Controlla lo stato del pulsante
 }
 
 // =============================== FUNZIONI DI SUPPORTO ================================
@@ -302,7 +294,6 @@ void btnTick() {
   }
 }
 
-// --- NUOVA FUNZIONE getMotion ---
 void getMotion() {
   if (millis() - mpuTimer > 10) {
     mpuTimer = millis();
@@ -316,15 +307,32 @@ void getMotion() {
   }
 }
 
+/*
+ * =================================================================================
+ * === IMPORTANTE: CALIBRAZIONE DEL SENSORE                                      ===
+ * =================================================================================
+ * Le soglie (threshold) per i colpi (strike) e i movimenti (swing) dipendono
+ * molto dal sensore specifico e da come è montato.
+ * Per CALIBRARE:
+ * 1. Abilita il DEBUG in `config.h`.
+ * 2. Apri il Serial Monitor a 115200 baud.
+ * 3. Muovi la spada e osserva i valori di ACC e GYR stampati.
+ * 4. Modifica le soglie in `config.h` per adattarle ai tuoi valori.
+ */
+
 void strikeTick() {
     if (wav && wav->isRunning()) return;
     
-    // Le soglie andranno ritestate, perché i valori della nuova libreria sono diversi
-    if (ACC > 30) { // Esempio di nuova soglia per il colpo
-        if (ACC > 60) { // Esempio di nuova soglia per il colpo forte
-            strcpy_P(sound_buffer, (char*)pgm_read_word(&(strikes[random(2)])));
+    // Stampa i valori per il debug, se abilitato
+    if (DEBUG && ACC > 15) {
+      Serial.print("ACC: "); Serial.println(ACC);
+    }
+
+    if (ACC > STRIKE_THR) {
+        if (ACC > STRIKE_S_THR) {
+            strcpy_P(sound_buffer, (char*)pgm_read_word(&(strikes[random(8)])));
         } else {
-            strcpy_P(sound_buffer, (char*)pgm_read_word(&(strikes_short[random(2)])));
+            strcpy_P(sound_buffer, (char*)pgm_read_word(&(strikes_short[random(8)])));
         }
         playSound(sound_buffer);
         hit_flash();
@@ -332,18 +340,23 @@ void strikeTick() {
 }
 
 void swingTick() {
+    unsigned long current_millis = millis();
     if (wav && wav->isRunning()) return;
-    if (millis() - swing_timer < SWING_TIMEOUT) return;
+    if (current_millis - swing_timer < SWING_TIMEOUT) return;
     
-    // Le soglie andranno ritestate
-    if (GYR > 4) { // Esempio di nuova soglia per il movimento
-        if (GYR > 8) { // Esempio di nuova soglia per il movimento veloce
-            strcpy_P(sound_buffer, (char*)pgm_read_word(&(swings[random(2)])));
+    // Stampa i valori per il debug, se abilitato
+    if (DEBUG && GYR > 2) {
+      Serial.print("GYR: "); Serial.println(GYR);
+    }
+
+    if (GYR > SWING_L_THR) {
+        if (GYR > SWING_THR) {
+            strcpy_P(sound_buffer, (char*)pgm_read_word(&(swings[random(5)])));
         } else {
-            strcpy_P(sound_buffer, (char*)pgm_read_word(&(swings_L[random(2)])));
+            strcpy_P(sound_buffer, (char*)pgm_read_word(&(swings_L[random(4)])));
         }
         playSound(sound_buffer);
-        swing_timer = millis();
+        swing_timer = current_millis;
     }
 }
 
@@ -366,18 +379,19 @@ void hit_flash() { setAll(255, 255, 255); delay(FLASH_DELAY); setAll(red_val, gr
 
 void setColor(byte color) {
   switch (color) {
-    case 0: red_val = 255; green_val = 0;   blue_val = 0;   break;
-    case 1: red_val = 0;   green_val = 255; blue_val = 0;   break;
-    case 2: red_val = 0;   green_val = 0;   blue_val = 255; break;
-    case 3: red_val = 255; green_val = 0;   blue_val = 255; break;
-    case 4: red_val = 255; green_val = 255; blue_val = 0;   break;
-    case 5: red_val = 0;   green_val = 255; blue_val = 255; break;
+    case 0: red_val = 255; green_val = 0;   blue_val = 0;   break; // Rosso
+    case 1: red_val = 0;   green_val = 255; blue_val = 0;   break; // Verde
+    case 2: red_val = 0;   green_val = 0;   blue_val = 255; break; // Blu
+    case 3: red_val = 255; green_val = 0;   blue_val = 255; break; // Magenta
+    case 4: red_val = 255; green_val = 255; blue_val = 0;   break; // Giallo
+    case 5: red_val = 0;   green_val = 255; blue_val = 255; break; // Ciano
   }
 }
 
 // --- GESTIONE BATTERIA ---
-#define VALORE_ADC_PIENO 3150
-#define VALORE_ADC_SCARICO 2400
+// Questi valori dipendono dal partitore di tensione e dalla risoluzione dell'ADC
+#define VALORE_ADC_PIENO 3150      // Valore ADC a batteria carica (es. 4.2V)
+#define VALORE_ADC_SCARICO 2400    // Valore ADC a batteria scarica (es. 3.2V)
 
 void batteryTick() {
   if (BATTERY_SAFE && (millis() - battery_timer > 30000)) {
@@ -392,8 +406,13 @@ byte voltage_measure() {
   uint32_t sum = 0;
   for (int i = 0; i < 10; i++) {
     sum += analogRead(VOLT_PIN);
+    delay(1);
   }
   int valoreLetto = sum / 10;
+
+  // Calcola la tensione reale per il debug
+  voltage = (valoreLetto / 4095.0) * 3.3 * ((R1 + R2) / R2);
+
   int percent = map(valoreLetto, VALORE_ADC_SCARICO, VALORE_ADC_PIENO, 0, 100);
   return constrain(percent, 0, 100);
 }
