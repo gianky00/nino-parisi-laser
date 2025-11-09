@@ -129,7 +129,7 @@ void setup() {
   // --- TEST 4: Sistema Audio (I2S) ---
   Serial.println("\n[TEST 4] --- Sistema Audio ---");
   out = new AudioOutputI2S(0, 1);
-  out->SetPinout(25, SPEAKER_PIN, 27);
+  out->SetPinout(26, SPEAKER_PIN, 27); // BCLK_PIN corretto a 26
   out->SetOutputModeMono(true);
   out->SetGain(2.0);
   const char* test_sound = "/ON.wav";

@@ -32,7 +32,7 @@
 
 // ========================= DEFINIZIONE PINOUT I2S =========================
 // Questi pin sono quelli usati dalla libreria ESP8266Audio nel progetto principale.
-#define I2S_BCLK_PIN      25 // Bit Clock
+#define I2S_BCLK_PIN      26 // Bit Clock (PIN CORRETTO PER ESP32-S3)
 #define I2S_LRC_PIN       17 // Left/Right Clock (corrisponde a SPEAKER_PIN nel progetto originale)
 #define I2S_DOUT_PIN      27 // Data Out
 
