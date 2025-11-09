@@ -7,60 +7,39 @@
  * === Utilizza librerie moderne e testate per la massima compatibilità.          ===
  * ==================================================================================
  *
- * AGGIORNAMENTI CHIAVE IN QUESTA VERSIONE (V2):
- * - SOSTITUITE le vecchie librerie I2Cdev e MPU6050 con la libreria ufficiale
- * "Adafruit MPU6050". Questo risolve i problemi di compilazione e blocco.
- * - Semplificata l'inizializzazione del sensore.
- * - Corretto il valore della resistenza R2 per la sicurezza dell'ESP32.
- * - Mantenute tutte le funzionalità originali con codice più pulito e stabile.
+ * AGGIORNAMENTI CHIAVE IN QUESTA VERSIONE (V3 - DAC Audio):
+ * - SOSTITUITA la libreria esterna ESP8266Audio con una implementazione audio
+ *   custom basata sul DAC interno dell'ESP32.
+ * - Questo risolve i problemi di compilazione e dipendenza, rendendo il
+ *   progetto più robusto.
  */
 
 // ============================ LIBRERIE ============================
-// --- Librerie Core ---
 #include <Arduino.h>
 #include <EEPROM.h>
 #include "Wire.h"
 #include <SPI.h>
 #include <SD.h>
-
-// --- Librerie Specifiche per Dispositivi ---
 #include "FastLED.h"
-// --- MODIFICA IMPORTANTE: Nuove librerie per il sensore MPU6050 ---
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
-
-// --- LIBRERIE AUDIO DI ALTA QUALITÀ PER ESP32 ---
-#include "AudioFileSourceSD.h"
-#include "AudioFileSourceID3.h"
-#include "AudioGeneratorWAV.h"
-#include "AudioOutputWithDac.h" // Modificato per DAC
+#include "driver/dac.h" // Libreria per il DAC
 
 // ========================= DEFINIZIONE HARDWARE & PINOUT (ESP32-S3) =========================
-// --- Striscia LED ---
 #define LED_PIN 18
 #define NUM_LEDS 30
 #define BRIGHTNESS 255
-
-// --- Pulsante di Controllo ---
 #define BTN_PIN 4
-
-// --- Altoparlante / Amplificatore ---
 #define SPEAKER_PIN 17
-
-// --- Comunicazione I2C (Sensore MPU6050) ---
 #define MPU_SDA_PIN 8
 #define MPU_SCL_PIN 9
-
-// --- Comunicazione SPI (Modulo Scheda SD) ---
 #define SD_CS_PIN 10
 #define SPI_MOSI_PIN 11
 #define SPI_MISO_PIN 13
 #define SPI_SCK_PIN 12
-
-// --- Misurazione Tensione Batteria ---
 #define VOLT_PIN 1
 #define R1 100000.0f
-#define R2 33000.0f         // Valore corretto per la sicurezza dell'ESP32
+#define R2 33000.0f
 
 // ============================ IMPOSTAZIONI DEL PROGETTO ============================
 #define BTN_TIMEOUT 800
@@ -70,88 +49,127 @@
 #define STRIKE_THR 150
 #define STRIKE_S_THR 320
 #define FLASH_DELAY 80
-
 #define PULSE_ALLOW 1
 #define PULSE_AMPL 20
 #define PULSE_DELAY 30
-
 #define BATTERY_SAFE 1
 #define DEBUG 1
 
 // ============================ OGGETTI GLOBALI & VARIABILI ============================
-// --- Dispositivi & Librerie ---
 CRGB leds[NUM_LEDS];
-Adafruit_MPU6050 mpu; // NUOVO oggetto per il sensore
+Adafruit_MPU6050 mpu;
 SPIClass spi = SPIClass(HSPI);
-
-// --- Audio Objects ---
-AudioGeneratorWAV *wav;
-AudioFileSourceSD *file;
-AudioOutputWithDac *out; // Modificato per DAC
-
-// --- Dati di Movimento & Sensore ---
 unsigned long ACC, GYR;
 unsigned long mpuTimer;
-
-// --- Stato della Spada Laser ---
 boolean ls_state = false;
 boolean ls_chg_state = false;
-
-// --- Gestione Pulsante ---
 boolean btnState, btn_flag, hold_flag;
 byte btn_counter;
 unsigned long btn_timer;
-
-// --- Timer ---
 unsigned long PULSE_timer, swing_timer, swing_timeout, battery_timer;
-
-// --- Colore & Effetti ---
 byte nowColor;
 byte red_val, green_val, blue_val, redOffset, greenOffset, blueOffset;
 int PULSEOffset;
 float k = 0.2;
-
-// --- Sistema ---
 boolean eeprom_flag = false;
 float voltage;
+TaskHandle_t audioTaskHandle = NULL;
+volatile bool isPlaying = false;
 
 // ============================ DEFINIZIONE FILE AUDIO (PROGMEM) ============================
-// NOTA: I nomi dei file sulla scheda SD devono iniziare con una barra '/'
 const char strike1[] PROGMEM = "/SK1.wav"; const char strike2[] PROGMEM = "/SK2.wav";
-const char* const strikes[] PROGMEM = { strike1, strike2 /*, ... (omesso per brevità) */};
-
+const char* const strikes[] PROGMEM = { strike1, strike2 };
 const char strike_s1[] PROGMEM = "/SKS1.wav"; const char strike_s2[] PROGMEM = "/SKS2.wav";
-const char* const strikes_short[] PROGMEM = { strike_s1, strike_s2 /*, ... */};
-
+const char* const strikes_short[] PROGMEM = { strike_s1, strike_s2 };
 const char swing1[] PROGMEM = "/SWS1.wav"; const char swing2[] PROGMEM = "/SWS2.wav";
-const char* const swings[] PROGMEM = { swing1, swing2 /*, ... */};
-
+const char* const swings[] PROGMEM = { swing1, swing2 };
 const char swingL1[] PROGMEM = "/SWL1.wav"; const char swingL2[] PROGMEM = "/SWL2.wav";
-const char* const swings_L[] PROGMEM = { swingL1, swingL2 /*, ... */};
-
+const char* const swings_L[] PROGMEM = { swingL1, swingL2 };
 const char sound_on[] PROGMEM = "/ON.wav";
 const char sound_off[] PROGMEM = "/OFF.wav";
 const char sound_hum[] PROGMEM = "/HUM.wav";
 char sound_buffer[12];
+
+// =============================== FUNZIONE AUDIO custom ================================
+void audioTask(void *parameter) {
+    char* filename = (char*)parameter;
+    File audioFile = SD.open(filename);
+
+    if (!audioFile) {
+        if(DEBUG) Serial.println("Audio file not found");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    // Leggi l'header WAV (semplificato)
+    uint32_t sampleRate = 0;
+    audioFile.seek(24);
+    audioFile.read((byte*)&sampleRate, 4);
+
+    uint16_t bitsPerSample = 0;
+    audioFile.seek(34);
+    audioFile.read((byte*)&bitsPerSample, 2);
+
+    audioFile.seek(44); // Salta l'header
+
+    if(bitsPerSample != 8 && bitsPerSample != 16) {
+        if(DEBUG) Serial.println("Unsupported bit depth");
+        audioFile.close();
+        vTaskDelete(NULL);
+        return;
+    }
+
+    isPlaying = true;
+
+    uint32_t delay_us = 1000000 / sampleRate;
+    uint8_t buffer[512];
+    int bytesRead;
+
+    while (isPlaying && (bytesRead = audioFile.read(buffer, sizeof(buffer))) > 0) {
+        for (int i = 0; i < bytesRead; i++) {
+            uint8_t sample;
+            if (bitsPerSample == 8) {
+                sample = buffer[i]; // 8-bit WAV (unsigned)
+            } else { // 16-bit
+                // Converti 16-bit signed a 8-bit unsigned per il DAC
+                int16_t sample16 = (int16_t)(buffer[i+1] << 8 | buffer[i]);
+                sample = (sample16 >> 8) + 128;
+                i++;
+            }
+            dac_output_voltage(DAC_CHANNEL_1, sample);
+            delayMicroseconds(delay_us);
+        }
+    }
+
+    audioFile.close();
+    isPlaying = false;
+    vTaskDelete(NULL);
+}
+
+void playSound(const char* filename) {
+    if (isPlaying) {
+        isPlaying = false;
+        vTaskDelay(pdMS_TO_TICKS(10)); // Dai tempo al task di terminare
+    }
+    strcpy(sound_buffer, filename);
+    xTaskCreate(audioTask, "AudioTask", 2048, sound_buffer, 5, &audioTaskHandle);
+}
 
 // =================================== SETUP ===================================
 void setup() {
   if (DEBUG) {
     Serial.begin(115200);
     while (!Serial) { delay(10); }
-    Serial.println(F("Avvio GyverSaber su ESP32 (V2 Stabile)..."));
+    Serial.println(F("Avvio GyverSaber su ESP32 (V3 - DAC Audio)..."));
   }
 
   pinMode(BTN_PIN, INPUT_PULLUP);
-
   Wire.begin(MPU_SDA_PIN, MPU_SCL_PIN);
-  
   spi.begin(SPI_SCK_PIN, SPI_MISO_PIN, SPI_MOSI_PIN, SD_CS_PIN);
   
-  // --- NUOVA INIZIALIZZAZIONE MPU6050 ---
   if (!mpu.begin()) {
     if(DEBUG) Serial.println("MPU6050 non trovato!");
-    while (1) { delay(10); }
+    while (1);
   }
   mpu.setAccelerometerRange(MPU6050_RANGE_16_G);
   mpu.setGyroRange(MPU6050_RANGE_250_DEG);
@@ -168,9 +186,7 @@ void setup() {
     if (DEBUG) Serial.println(F("Scheda SD OK"));
   }
   
-  out = new AudioOutputWithDac(); // Modificato per DAC
-  out->SetPin(SPEAKER_PIN);
-  out->SetGain(2.0);
+  dac_output_enable(DAC_CHANNEL_1);
 
   EEPROM.begin(16);
   if (EEPROM.read(0) <= 5) {
@@ -182,11 +198,11 @@ void setup() {
   }
   setColor(nowColor);
 
-  byte capacity = voltage_measure();
+  voltage_measure();
   if (DEBUG) {
     Serial.print(F("Tensione Batteria: ")); Serial.println(voltage);
   }
-  int ledsToShow = map(capacity, 100, 0, (NUM_LEDS / 2), 0);
+  int ledsToShow = map(analogRead(VOLT_PIN), 2400, 3150, 0, (NUM_LEDS / 2));
   for (int i = 0; i < ledsToShow; i++) {
     setPixel(i, red_val, green_val, blue_val);
     setPixel((NUM_LEDS - 1 - i), red_val, green_val, blue_val);
@@ -200,14 +216,6 @@ void setup() {
 
 // =================================== MAIN LOOP ===================================
 void loop() {
-  if (wav && wav->isRunning()) {
-    if (!wav->loop()) {
-      wav->stop();
-      delete wav; wav = nullptr;
-      delete file; file = nullptr;
-    }
-  }
-
   handleSaberState();
   if(ls_state){
     randomPULSE();
@@ -216,34 +224,19 @@ void loop() {
     swingTick();
     batteryTick();
     
-    if (!wav || !wav->isRunning()){
+    if (!isPlaying){
       strcpy_P(sound_buffer, (char*)pgm_read_word(&(sound_hum)));
       playSound(sound_buffer);
     }
   }
-
   btnTick();
 }
 
-// =============================== FUNZIONI DI SUPPORTO ================================
-
-void playSound(const char* filename) {
-  if (wav && wav->isRunning()) {
-    wav->stop();
-    delete wav; wav = nullptr;
-    delete file; file = nullptr;
-  }
-  
-  file = new AudioFileSourceSD(filename);
-  wav = new AudioGeneratorWAV();
-  wav->begin(file, out);
-}
+// =============================== FUNZIONI DI SUPPORTO (VECCHIE) ================================
 
 void handleSaberState() {
   if (!ls_chg_state) return;
-
   ls_state = !ls_state;
-
   if (ls_state) {
     if (voltage_measure() > 10 || !BATTERY_SAFE) {
       if (DEBUG) Serial.println(F("SPADA ACCESA"));
@@ -281,13 +274,11 @@ void btnTick() {
     btn_flag = false;
     hold_flag = false;
   }
-
   if (btn_flag && btnState && (millis() - btn_timer > BTN_TIMEOUT) && !hold_flag) {
     ls_chg_state = true;
     hold_flag = true;
     btn_counter = 0;
   }
-
   if ((millis() - btn_timer > BTN_TIMEOUT) && (btn_counter != 0)) {
     if (ls_state) {
       if (btn_counter == 3) {
@@ -301,26 +292,20 @@ void btnTick() {
   }
 }
 
-// --- NUOVA FUNZIONE getMotion ---
 void getMotion() {
   if (millis() - mpuTimer > 10) {
     mpuTimer = millis();
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
-
-    // Calcoliamo la magnitudine totale dei vettori
-    // Usiamo i valori diretti in m/s^2 e rad/s, che sono più standard
     ACC = sqrt(sq(a.acceleration.x) + sq(a.acceleration.y) + sq(a.acceleration.z));
     GYR = sqrt(sq(g.gyro.x) + sq(g.gyro.y) + sq(g.gyro.z));
   }
 }
 
 void strikeTick() {
-    if (wav && wav->isRunning()) return;
-    
-    // Le soglie andranno ritestate, perché i valori della nuova libreria sono diversi
-    if (ACC > 30) { // Esempio di nuova soglia per il colpo
-        if (ACC > 60) { // Esempio di nuova soglia per il colpo forte
+    if (isPlaying) return;
+    if (ACC > 30) {
+        if (ACC > 60) {
             strcpy_P(sound_buffer, (char*)pgm_read_word(&(strikes[random(2)])));
         } else {
             strcpy_P(sound_buffer, (char*)pgm_read_word(&(strikes_short[random(2)])));
@@ -331,12 +316,10 @@ void strikeTick() {
 }
 
 void swingTick() {
-    if (wav && wav->isRunning()) return;
+    if (isPlaying) return;
     if (millis() - swing_timer < SWING_TIMEOUT) return;
-    
-    // Le soglie andranno ritestate
-    if (GYR > 4) { // Esempio di nuova soglia per il movimento
-        if (GYR > 8) { // Esempio di nuova soglia per il movimento veloce
+    if (GYR > 4) {
+        if (GYR > 8) {
             strcpy_P(sound_buffer, (char*)pgm_read_word(&(swings[random(2)])));
         } else {
             strcpy_P(sound_buffer, (char*)pgm_read_word(&(swings_L[random(2)])));
@@ -374,10 +357,6 @@ void setColor(byte color) {
   }
 }
 
-// --- GESTIONE BATTERIA ---
-#define VALORE_ADC_PIENO 3150
-#define VALORE_ADC_SCARICO 2400
-
 void batteryTick() {
   if (BATTERY_SAFE && (millis() - battery_timer > 30000)) {
     battery_timer = millis();
@@ -393,6 +372,7 @@ byte voltage_measure() {
     sum += analogRead(VOLT_PIN);
   }
   int valoreLetto = sum / 10;
-  int percent = map(valoreLetto, VALORE_ADC_SCARICO, VALORE_ADC_PIENO, 0, 100);
+  voltage = (float)valoreLetto * 3.3f / 4095.0f * (R1 + R2) / R2;
+  int percent = map(valoreLetto, 2400, 3150, 0, 100);
   return constrain(percent, 0, 100);
 }
