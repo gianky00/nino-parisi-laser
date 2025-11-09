@@ -77,7 +77,6 @@ void setup() {
   if (!mpu.begin()) {
     Serial.println("RISULTATO: ERRORE! Sensore MPU6050 non trovato.");
     Serial.println("  - Controlla i collegamenti I2C (SDA, SCL) e l'alimentazione del sensore.");
-    while (1); // Blocca l'esecuzione per evidenziare il problema
   } else {
     Serial.println("RISULTATO: SUCCESSO! Sensore MPU6050 inizializzato correttamente.");
   }
