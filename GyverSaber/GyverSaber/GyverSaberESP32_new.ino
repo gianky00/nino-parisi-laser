@@ -33,7 +33,7 @@
 #include "AudioFileSourceSD.h"
 #include "AudioFileSourceID3.h"
 #include "AudioGeneratorWAV.h"
-#include "AudioOutputI2S.h"
+#include "AudioOutputWithDac.h" // Modificato per DAC
 
 // ========================= DEFINIZIONE HARDWARE & PINOUT (ESP32-S3) =========================
 // --- Striscia LED ---
@@ -87,7 +87,7 @@ SPIClass spi = SPIClass(HSPI);
 // --- Audio Objects ---
 AudioGeneratorWAV *wav;
 AudioFileSourceSD *file;
-AudioOutputI2S *out;
+AudioOutputWithDac *out; // Modificato per DAC
 
 // --- Dati di Movimento & Sensore ---
 unsigned long ACC, GYR;
@@ -168,9 +168,8 @@ void setup() {
     if (DEBUG) Serial.println(F("Scheda SD OK"));
   }
   
-  out = new AudioOutputI2S(0, 1);
-  out->SetPinout(26, SPEAKER_PIN, 27); // BCLK_PIN corretto a 26
-  out->SetOutputModeMono(true);
+  out = new AudioOutputWithDac(); // Modificato per DAC
+  out->SetPin(SPEAKER_PIN);
   out->SetGain(2.0);
 
   EEPROM.begin(16);

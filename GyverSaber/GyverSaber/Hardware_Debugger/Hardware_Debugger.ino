@@ -29,7 +29,7 @@
 #include <Adafruit_Sensor.h>
 #include "AudioFileSourceSD.h"
 #include "AudioGeneratorWAV.h"
-#include "AudioOutputI2S.h"
+#include "AudioOutputWithDac.h" // Modificato per DAC
 
 // ========================= DEFINIZIONE HARDWARE & PINOUT (ESP32-S3) =========================
 #define LED_PIN 18
@@ -51,7 +51,7 @@ Adafruit_MPU6050 mpu;
 SPIClass spi = SPIClass(HSPI);
 AudioGeneratorWAV *wav;
 AudioFileSourceSD *file;
-AudioOutputI2S *out;
+AudioOutputWithDac *out; // Modificato per DAC
 
 // =========================== FUNZIONE DI PAUSA INTERATTIVA ===========================
 void waitForUserInput() {
@@ -126,11 +126,10 @@ void setup() {
   Serial.println("  - Se non hai visto i colori, controlla il collegamento del pin dati e l'alimentazione della striscia.");
   waitForUserInput();
 
-  // --- TEST 4: Sistema Audio (I2S) ---
+  // --- TEST 4: Sistema Audio (DAC) ---
   Serial.println("\n[TEST 4] --- Sistema Audio ---");
-  out = new AudioOutputI2S(0, 1);
-  out->SetPinout(26, SPEAKER_PIN, 27); // BCLK_PIN corretto a 26
-  out->SetOutputModeMono(true);
+  out = new AudioOutputWithDac(); // Modificato per DAC
+  out->SetPin(SPEAKER_PIN);
   out->SetGain(2.0);
   const char* test_sound = "/ON.wav";
 
