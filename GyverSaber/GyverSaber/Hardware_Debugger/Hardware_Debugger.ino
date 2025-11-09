@@ -23,9 +23,6 @@
 #include "FastLED.h"
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
-extern "C" {
-#include "driver/dac.h"
-}
 
 // ========================= DEFINIZIONE HARDWARE & PINOUT (ESP32-S3) =========================
 #define LED_PIN 18
@@ -89,13 +86,13 @@ void playTestSound() {
     while ((bytesRead = audioFile.read(buffer, sizeof(buffer))) > 0) {
         for (int i = 0; i < bytesRead; i++) {
             uint8_t sample = (bitsPerSample == 8) ? buffer[i] : ((int16_t)(buffer[i+1] << 8 | buffer[i]) >> 8) + 128;
-            dac_output_voltage(DAC_CHANNEL_1, sample);
+            dacWrite(SPEAKER_PIN, sample);
             delayMicroseconds(delay_us);
             if (bitsPerSample == 16) i++;
         }
     }
 
-    dac_output_voltage(DAC_CHANNEL_1, 128); // Silenzia il DAC
+    dacWrite(SPEAKER_PIN, 128); // Silenzia il DAC
     audioFile.close();
     Serial.println("  - Riproduzione completata.");
 }
@@ -141,7 +138,6 @@ void setup() {
 
   // --- TEST 4: Sistema Audio (DAC) ---
   Serial.println("\n[TEST 4] --- Sistema Audio (DAC) ---");
-  dac_output_enable(DAC_CHANNEL_1);
   playTestSound();
 
   Serial.println("\n===== DIAGNOSTICA INIZIALE COMPLETATA =====");

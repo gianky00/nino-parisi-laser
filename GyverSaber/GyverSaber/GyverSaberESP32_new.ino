@@ -23,9 +23,6 @@
 #include "FastLED.h"
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
-extern "C" {
-#include "driver/dac.h"
-}
 
 // ========================= DEFINIZIONE HARDWARE & PINOUT (ESP32-S3) =========================
 #define LED_PIN 18
@@ -138,7 +135,7 @@ void audioTask(void *parameter) {
                 sample = (sample16 >> 8) + 128;
                 i++;
             }
-            dac_output_voltage(DAC_CHANNEL_1, sample);
+            dacWrite(SPEAKER_PIN, sample);
             delayMicroseconds(delay_us);
         }
     }
@@ -188,8 +185,6 @@ void setup() {
     if (DEBUG) Serial.println(F("Scheda SD OK"));
   }
   
-  dac_output_enable(DAC_CHANNEL_1);
-
   EEPROM.begin(16);
   if (EEPROM.read(0) <= 5) {
     nowColor = EEPROM.read(0);
