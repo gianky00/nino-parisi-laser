@@ -23,7 +23,9 @@
 #include "FastLED.h"
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
-#include "driver/dac.h" // Libreria per il DAC
+extern "C" {
+#include "driver/dac.h"
+}
 
 // ========================= DEFINIZIONE HARDWARE & PINOUT (ESP32-S3) =========================
 #define LED_PIN 18
